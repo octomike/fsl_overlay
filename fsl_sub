@@ -73,7 +73,7 @@
 fslcluster_cell_settings=/usr/local/share/sge/default/common/settings.sh
 # Domain mail should be sent to if necessary. The complete address will be
 # `whoami`@${fslcluster_mailto_domain}
-fslcluster_mailto_domain=localhost
+fslcluster_mailto_domain=mpib-berlin.mpg.de
 # When should the cluster engine send status email (see qsub -m ... docs)
 # Don't send email by default; can be overidden by FSLCLUSTER_MAILOPTS
 # environment variable
@@ -108,6 +108,7 @@ fi
 # define the default 'qsub' implementation to be used for cluster submission
 qsub_cmd="qsub"
 
+FSLPARALLEL="torque"    # FIXME: move this out of here
 # Allow to override the above automatic detection result with FSLPARALLEL
 if [ -n "$FSLPARALLEL" ] ; then
     # Whenever FSLPARALLEL is set enfore using SGE even if no SGE_ROOT is set
@@ -118,6 +119,10 @@ if [ -n "$FSLPARALLEL" ] ; then
     if [ "$FSLPARALLEL" = "condor" ] ; then
         # if condor shall be used, simply switch to Condor's qsub emulation
         qsub_cmd="condor_qsub"
+    fi
+    if [ "$FSLPARALLEL" = "torque" ] ; then
+        METHOD=TORQUE
+        qsub_cmd="qsub"
     fi
 fi
 
@@ -237,6 +242,7 @@ else
 fi
 
 scriptmode=0
+verbose=1
 
 while [ $1 != -- ] ; do
   case $1 in
@@ -247,30 +253,44 @@ while [ $1 != -- ] ; do
       shift;;
     -T)
       # qsub wants the time limit in seconds
-      job_timelimit="-l h_rt=$(echo "$2 * 60" | bc)"
-      shift;;
-    -q)
-      queue="-q $2"
-      qconf -sql | grep ^$queue 2>&1 >/dev/null
-      if [ $? -eq 1 ]; then
-	  echo "Invalid queue specified!"
-	  exit 127
+      if [ $FSLPARALLEL = "torque" ] ; then
+        job_timelimit="-l walltime=$(echo "$2 * 60" | bc)"
+      else
+        job_timelimit="-l h_rt=$(echo "$2 * 60" | bc)"
       fi
       shift;;
+    -q)
+      queue="$2"
+      if [ $FSLPARALLEL = "torque" ]; then
+        qselect -Q $queue | grep -v "Unknown queue"
+      else
+        qconf -sql | grep ^$queue 2>&1 >/dev/null
+      fi
+      if [ $? -eq 1 ]; then
+	    echo "Invalid queue specified!"
+	    exit 127
+      fi
+      queue="-q "$queue
+      shift;;
     -a)
+      sge_arch=""
+      # ignore -l arch for now
+      if [ $FSLPARALLEL = "torque" ]; then
+        shift;
+      fi
       acceptable_arch=no
       available_archs=`qhost | tail -n +4 | awk '{print $2}' | sort | uniq`
       for a in $available_archs; do
-	if [ $2 = $a ] ; then
-	  acceptable_arch=yes
-	fi
+	    if [ $2 = $a ] ; then
+	      acceptable_arch=yes
+	    fi
       done
       if [ $acceptable_arch = yes ]; then
-	  sge_arch="-l arch=$2"
+	    sge_arch="-l arch=$2"
       else
-	  echo "Sorry arch of $2 is not supported on this SGE configuration!"
-	  echo "Should be one of:" $available_archs
-	  exit 127
+	    echo "Sorry arch of $2 is not supported on this SGE configuration!"
+	    echo "Should be one of:" $available_archs
+	    exit 127
       fi
       shift;;
     -p)
@@ -281,7 +301,11 @@ while [ $1 != -- ] ; do
       shift;;
     -j)
       jid=$2
-      sge_hold="-hold_jid $jid"
+      if [ $FSLPARALLEL = "torque" ]; then
+        sge_hold="-W afterany:$jid"
+      else
+        sge_hold="-hold_jid $jid"
+      fi
       shift;;
     -t)
       taskfile=$2
@@ -301,11 +325,18 @@ while [ $1 != -- ] ; do
       shift;;
     -F)
       scriptmode=1;
+      if [ $FSLPARALLEL = "torque" ]; then
+        echo "WARNING: This is torque, not SGE, therefore scriptmode"
+        echo "         might behave unexpectedly some fsl scripts.  "
+      fi
       ;;
     -v)
       verbose=1
       ;;
     -s)
+      if [ $FSLPARALLEL = "torque" ]; then
+        echo "Warning: requested -pe mode , might fail (this is torque, not SGE)"
+      fi
       pe_string=$2;
       peName=`echo $pe_string | cut -d',' -f 1`
       peThreads=`echo $pe_string | cut -d',' -f 2`
@@ -341,8 +372,8 @@ fi
 
 if [ "x$peName" != "x" ]; then
     # If the PE name is 'openmp' then limit the number of threads to those specified
-    
-    if [ "X$peName" = "X$omp_pe" ]; then
+
+    if [ "X$peName" = "Xomp_pe" ]; then
         OMP_NUM_THREADS=$peThreads
 	export OMP_NUM_THREADS
     fi
@@ -357,6 +388,48 @@ case $METHOD in
 # command, otherwise qsub is processing a text file of parallel
 # commands.
 ###########################################################################
+
+    TORQUE)
+
+	if [ -n "$peName" ]; then
+        if [ "$peName" != "omp_pe" ]; then
+            echo "Error: Parallel Environment (SGE) other than OpenMP requested but NYI"
+            exit -1
+        else
+            # emulating what I understand -pe does
+            # OMP_NUM_THREADS has already been exported
+            # there is no obvious barrier for thread number
+            # ... this is weird
+	        pe_options="-l nodes=1:ppn=$peThreads"
+        fi
+    fi
+	if [ "x$tasks" = "x" ] ; then
+	    if [ $scriptmode -ne 1 ] ; then
+		    pbs_command="$qsub_cmd -V -d $PWD -r y $job_timelimit $queue $pe_options \
+                         -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold"
+	    else
+		    pbs_command="$qsub_cmd $LogOpts $sge_arch $sge_hold"
+	    fi
+	    if [ $verbose -eq 1 ] ; then
+		    echo pbs_command: $pbs_command >&2
+		    echo executing: $@ >&2
+	    fi
+        echo -e $@ | $pbs_command
+
+    else
+	    pbs_command="$qsub_cmd -V -d $PWD $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_tasks"
+	    if [ $verbose -eq 1 ] ; then
+		    echo pbs_command: $pbs_command >&2
+		    echo control file: $taskfile >&2
+	    fi
+        pwd
+        echo 'cmd=$(sed -n -e "${PBS_ARRAYID}p"' $taskfile ')' > tmpjob
+        echo '$cmd' >> tmpjob
+	    exec $pbs_command tmpjob
+        rm -f tmpjob
+    fi
+    ;;
+
 
     SGE)
        ###########################################################################
@@ -390,7 +463,7 @@ case $METHOD in
 	    fi
 
 	    # The -w e option will result in the job failing if there are insufficient slots
-            # on any of the cluster nodes
+        # on any of the cluster nodes
 	    pe_options="-pe $peName $peThreads -w e"
 
 	fi
