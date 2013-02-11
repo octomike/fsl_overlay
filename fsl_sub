@@ -156,10 +156,12 @@ $command -a darwin regscript rawdata outputdir ...
   -q <queuename>        Possible values for <queuename> can be queried with
                         'qconf -sql'
   -a <arch-name>        Architecture [e.g., darwin or lx24-amd64]
-  -p <job-priority>     Lower priority [0:-1024] default = 0                 
+  -p <job-priority>     Lower priority [0:-1024] default = 0
   -M <email-address>    Who to email, default = `whoami`@localhost
   -j <jid>              Place a hold on this task until job jid has completed
   -t <filename>         Specify a task file of commands to execute in parallel
+  -c <batchsize>        Specify the number of commands associated with one task
+                        ( default is 1 )
   -N <jobname>          Specify jobname as it will appear on queue
   -l <logdirname>       Where to output logfiles
   -m <mailoptions>      Change the SGE mail options, see qsub for details
@@ -168,6 +170,7 @@ $command -a darwin regscript rawdata outputdir ...
   -s <pename>,<threads> Submit a multi-threaded task - requires a PE (<pename>) to be
                         configured for the requested queues.
                         <threads> specifies the number of threads to run
+  -B                    block after job submission
   -v                    Verbose mode.
 EOF
 
@@ -179,7 +182,7 @@ if [ $nargs -eq 0 ] ; then
   usage
 fi
 
-set -- `getopt T:q:a:p:M:j:t:z:N:Fvm:l:s: $*`
+set -- `getopt T:q:a:p:M:j:t:c:z:N:BFvm:l:s: $*`
 result=$?
 if [ $result != 0 ] ; then
   echo "What? Your arguments make no sense!"
@@ -241,8 +244,9 @@ else
     echo "METHOD=$METHOD : args=$@" >&2
 fi
 
+block=0
 scriptmode=0
-verbose=1
+chunksize=1     # do not remove me, we will divide by $chunksize later
 
 while [ $1 != -- ] ; do
   case $1 in
@@ -310,7 +314,9 @@ while [ $1 != -- ] ; do
     -t)
       taskfile=$2
       tasks=`wc -l $taskfile | awk '{print $1}'`
-      sge_tasks="-t 1-$tasks"
+      shift;;
+    -c)
+      chunksize=$2
       shift;;
     -N)
       JobName=$2;
@@ -332,6 +338,13 @@ while [ $1 != -- ] ; do
       ;;
     -v)
       verbose=1
+      ;;
+    -B)
+      if [ $FSLPARALLEL = "torque" ]; then
+        block=1
+      else
+        sge_block="-sync y"
+      fi
       ;;
     -s)
       if [ $FSLPARALLEL = "torque" ]; then
@@ -358,7 +371,7 @@ if [ "x$JobName" = x ] ; then
     fi
 fi
 
-if [ "x$tasks" != x ] && [ ! -f "$taskfile" ] ; then
+if [ "x$tasks" != "x" ] && [ ! -f "$taskfile" ] ; then
     echo $taskfile: invalid input!
     echo Should be a text file listing all the commands to run!
     exit -1
@@ -379,6 +392,22 @@ if [ "x$peName" != "x" ]; then
     fi
 
 fi
+
+if [ "x$tasks" != "x" ] ; then
+    # round up (tasks/chunksize)
+    tasks=$(( ($tasks + ($chunksize - 1) ) / $chunksize ))
+    sge_tasks="-t 1-$tasks"
+fi
+
+wait_for_torque() {
+    while(true); do
+        sleep 30s
+        qselect | grep "^$1" >/dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            return
+        fi
+    done
+}
 
 case $METHOD in
 
@@ -414,7 +443,11 @@ case $METHOD in
 		    echo pbs_command: $pbs_command >&2
 		    echo executing: $@ >&2
 	    fi
-        echo -e $@ | $pbs_command
+        jobid=$( echo $@ | $pbs_command | awk -F. '{print $1}' )
+        echo $jobid
+        if [ $block -eq 1 ]; then
+            wait_for_torque $jobid
+        fi
 
     else
 	    pbs_command="$qsub_cmd -V -d $PWD $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_tasks"
@@ -422,10 +455,17 @@ case $METHOD in
 		    echo pbs_command: $pbs_command >&2
 		    echo control file: $taskfile >&2
 	    fi
-        pwd
-        echo 'cmd=$(sed -n -e "${PBS_ARRAYID}p"' $taskfile ')' > tmpjob
+        echo 'chunk_beg=$(( (${PBS_ARRAYID} - 1) * '" $chunksize + 1 ))" > tmpjob
+        echo 'chunk_end=$(( ${PBS_ARRAYID} * '" $chunksize ))" >> tmpjob
+        echo 'cmd=$(sed -n -e "${chunk_beg},${chunk_end}p"' $taskfile ')' >> tmpjob
+        echo '/bin/sh <<EOS' >> tmpjob
         echo '$cmd' >> tmpjob
-	    exec $pbs_command tmpjob
+        echo 'EOS' >> tmpjob
+	    jobid=$( $pbs_command tmpjob | awk -F. '{print $1}' )
+        echo $jobid
+        if [ $block -eq 1 ]; then
+            wait_for_torque $jobid
+        fi
         rm -f tmpjob
     fi
     ;;
@@ -470,9 +510,9 @@ case $METHOD in
 
 	if [ "x$tasks" = "x" ] ; then
 	    if [ $scriptmode -ne 1 ] ; then
-		sge_command="$qsub_cmd -V -cwd -shell n -b y -r y $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold"
+		sge_command="$qsub_cmd -V -cwd -shell n -b y -r y $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_block"
 	    else
-		sge_command="$qsub_cmd $LogOpts $sge_arch $sge_hold"
+		sge_command="$qsub_cmd $LogOpts $sge_arch $sge_hold $sge_block"
 	    fi
 	    if [ $verbose -eq 1 ] ; then 
 		echo sge_command: $sge_command >&2
@@ -480,20 +520,18 @@ case $METHOD in
 	    fi
 	    exec $sge_command $@ | awk '{print $3}'
 	else
-	    sge_command="$qsub_cmd -V -cwd $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_tasks"
+	    sge_command="$qsub_cmd -V -cwd $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_tasks $sge_block"
 	    if [ $verbose -eq 1 ] ; then 
 		echo sge_command: $sge_command >&2
 		echo control file: $taskfile >&2
 	    fi
-	    exec $sge_command <<EOF | awk '{print $3}' | awk -F. '{print $1}'
-#!/bin/sh
-
-#$ -S /bin/sh
-
-command=\`sed -n -e "\${SGE_TASK_ID}p" $taskfile\`
-
-exec /bin/sh -c "\$command"
-EOF
+        echo 'chunk_beg=$(( (${SGE_TASK_ID} - 1) * '" $chunksize + 1 ))" > tmpjob
+        echo 'chunk_end=$(( ${SGE_TASK_ID} * '" $chunksize ))" >> tmpjob
+        echo 'cmd=$(sed -n -e "${chunk_beg},${chunk_end}p"' $taskfile ')' >> tmpjob
+        echo '/bin/sh <<EOS' >> tmpjob
+        echo '$cmd' >> tmpjob
+        echo 'EOS' >> tmpjob
+	    exec $sge_command tmpjob | awk '{print $3}' | awk -F. '{print $1}'
 	fi
 	;;
 
@@ -541,4 +579,3 @@ esac
 ###########################################################################
 # Done.
 ###########################################################################
-
