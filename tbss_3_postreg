@@ -68,6 +68,8 @@
 #   University, to negotiate a licence. Contact details are:
 #   innovation@isis.ox.ac.uk quoting reference DE/9564.
 
+FSL_SUB=/usr/share/fsl/overlay/fsl_sub
+
 Usage() {
     cat <<EOF
 
@@ -105,13 +107,14 @@ else
 
     n=`$FSLDIR/bin/imglob *_FA.nii* *_FA.img* *_FA.hdr* | wc -w`
 
-    for f in `$FSLDIR/bin/imglob *_FA.nii* *_FA.img* *_FA.hdr*` ; do
+    filelist=$($FSLDIR/bin/imglob *_FA.nii* *_FA.img* *_FA.hdr*)
+    for f in $filelist ; do
 
 	meanscore=0
 	medianscore=0
 
-	for g in `$FSLDIR/bin/imglob *_FA.nii* *_FA.img* *_FA.hdr*` ; do
-	
+	for g in $filelist; do
+
 	    thismeanscore=`cat ${g}_to_${f}_warp.msf | awk '{print $1}'`
 	    thismedianscore=`cat ${g}_to_${f}_warp.msf | awk '{print $2}'`
 
@@ -156,9 +159,10 @@ if [ `${FSLDIR}/bin/imtest target` = 1 ] && [ `$FSLDIR/bin/fslval $best dim1` = 
 	exit 1;
     fi
     for f in $filelist ; do
-	echo $f
-	$FSLDIR/bin/applywarp -i $f -o ${f}_to_target -r target -w ${f}_to_target_warp --rel
+	    #echo $f
+	    echo "$FSLDIR/bin/applywarp -i $f -o ${f}_to_target -r target -w ${f}_to_target_warp --rel" >> .commands.postreg
     done
+    $FSL_SUB -m n -l tbss_logs -T 60 -N tbss_3_postreg -B -t .commands.postreg
 
 else
 
@@ -168,9 +172,10 @@ else
 
     echo "transforming (and upsampling) all FA images into MNI152 space"
     for f in `$FSLDIR/bin/imglob *_FA.nii* *_FA.img* *_FA.hdr*` ; do
-	echo $f
-	$FSLDIR/bin/applywarp -i $f -o ${f}_to_target -r $FSLDIR/data/standard/FMRIB58_FA_1mm -w ${f}_to_${best}_warp --postmat=target_to_MNI152.mat
+	    #echo $f
+	    echo "$FSLDIR/bin/applywarp -i $f -o ${f}_to_target -r $FSLDIR/data/standard/FMRIB58_FA_1mm -w ${f}_to_${best}_warp --postmat=target_to_MNI152.mat" >> .commands.postreg
     done
+    $FSL_SUB -m n  -l tbss_logs -T 60 -N tbss_3_postreg -B -t .commands.postreg
 
 fi
 
