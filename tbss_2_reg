@@ -68,6 +68,8 @@
 #   University, to negotiate a licence. Contact details are:
 #   innovation@isis.ox.ac.uk quoting reference DE/9564.
 
+FSL_SUB=/usr/share/fsl/overlay/fsl_sub
+
 Usage() {
     cat <<EOF
 
@@ -85,17 +87,12 @@ EOF
 do_reg(){
 
     f=$1
+    shift
+    all_list=$*
 
-    for g in `$FSLDIR/bin/imglob *_FA.*` ; do
-        	
-	o=${g}_to_$f
-	
-	if [ ! -f ${o}_warp.msf ] ; then
-	    echo $o
-	    touch ${o}_warp.msf
-	    echo "$FSLDIR/bin/fsl_reg $g $f ${g}_to_$f -e -FA" >> .commands
-	fi
-	
+    for g in $all_list; do
+        o=${g}_to_$f
+        echo "$FSLDIR/bin/fsl_reg $g $f ${g}_to_$f -e -FA " >> .commands
     done
 }
 
@@ -103,14 +100,19 @@ do_reg(){
 
 echo [`date`] [`hostname`] [`uname -a`] [`pwd`] [$0 $@] >> .tbsslog
 
-/bin/rm -f FA/.commands
+/bin/rm -f FA/.commands*
 
 if [ $1 = -n ] ; then
     cd FA
-    for f in `$FSLDIR/bin/imglob *_FA.*` ; do
-	do_reg $f
+    chunksize=8
+    all_list=$($FSLDIR/bin/imglob *_FA.*)
+    # prepare commands _before_ submission so temporary output won't
+    # affect $(imglob *_FA.*)
+    for f in $all_list; do
+	    do_reg $f $all_list
     done
 else
+    chunksize=1
     if [ $1 = -T ] ; then
 	TARGET=$FSLDIR/data/standard/FMRIB58_FA_1mm
     elif [ $1 = -t ] ; then
@@ -125,8 +127,8 @@ else
     fi
     $FSLDIR/bin/imcp $TARGET FA/target
     cd FA
-    do_reg target
+    all_list=$($FSLDIR/bin/imglob *_FA.*)
+    do_reg target $all_list
 fi
 
-${FSLDIR}/bin/fsl_sub -l tbss_logs -T 60 -N tbss_2_reg -t .commands
-
+$FSL_SUB -l tbss_logs -T 60 -N tbss_2_reg -t .commands -c $chunksize
