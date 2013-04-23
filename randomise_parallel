@@ -62,6 +62,10 @@
 #   Innovation Limited ("Isis"), the technology transfer company of the
 #   University, to negotiate a licence. Contact details are:
 #   innovation@isis.ox.ac.uk quoting reference DE/9564.
+#
+
+FSL_SUB=/usr/share/fsl/overlay/fsl_sub
+
 if [ $# -le 3 ] ; then
   echo "$0 <randomise options>"
   echo ""
@@ -101,7 +105,6 @@ fi
 PERMS_PER_CONTRAST=`expr $PERMS_PER_SLOT \* $SLOTS_PER_CONTRAST`
 
 REQUESTED_SLOTS=`expr $CONTRASTS \* $SLOTS_PER_CONTRAST`
-      
 CORRECTED_PERMS=`expr $PERMS_PER_CONTRAST - $SLOTS_PER_CONTRAST`
 CORRECTED_PERMS=`expr $CORRECTED_PERMS + 1`
 
@@ -124,7 +127,7 @@ while [ $CURRENT_SEED -le $SLOTS_PER_CONTRAST ] ; do
   CURRENT_SEED=`expr $CURRENT_SEED + 1`
 done
 chmod a+x ${DIRNAME}/${BASENAME}.generate
-GENERATE_ID=`$FSLDIR/bin/fsl_sub -T ${REQUESTED_TIME} -N ${BASENAME}.generate -l ${DIRNAME}/${BASENAME}_logs/ -t ${DIRNAME}/${BASENAME}.generate` 
+GENERATE_ID=`$FSL_SUB -T ${REQUESTED_TIME} -N ${BASENAME}.generate -l ${DIRNAME}/${BASENAME}_logs/ -t ${DIRNAME}/${BASENAME}.generate`
 
 #stage2:
 cat <<combineScript > ${DIRNAME}/${BASENAME}.defragment
@@ -188,4 +191,5 @@ if [ ${REQUESTED_SLOTS} -ge 150 ] ; then
   DEFRAGMENT_TIME=40
 fi
 
-fsl_sub -j $GENERATE_ID -T ${DEFRAGMENT_TIME} -l ${DIRNAME}/${BASENAME}_logs/ -N ${BASENAME}.defragment ${DIRNAME}/${BASENAME}.defragment
+echo "${DIRNAME}/${BASENAME}.defragment" > ${DIRNAME}/${BASENAME}.command
+$FSL_SUB -j $GENERATE_ID -T ${DEFRAGMENT_TIME} -l ${DIRNAME}/${BASENAME}_logs/ -N ${BASENAME}.defragment -t ${DIRNAME}/${BASENAME}.command
