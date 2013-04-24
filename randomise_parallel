@@ -126,8 +126,7 @@ while [ $CURRENT_SEED -le $SLOTS_PER_CONTRAST ] ; do
   echo done $CURRENT_SEED
   CURRENT_SEED=`expr $CURRENT_SEED + 1`
 done
-chmod a+x ${DIRNAME}/${BASENAME}.generate
-GENERATE_ID=`$FSL_SUB -T ${REQUESTED_TIME} -N ${BASENAME}.generate -l ${DIRNAME}/${BASENAME}_logs/ -t ${DIRNAME}/${BASENAME}.generate`
+$FSL_SUB -T ${REQUESTED_TIME} -N ${BASENAME}.generate -l ${DIRNAME}/${BASENAME}_logs/ -t ${DIRNAME}/${BASENAME}.generate -B
 
 #stage2:
 cat <<combineScript > ${DIRNAME}/${BASENAME}.defragment
@@ -192,4 +191,4 @@ if [ ${REQUESTED_SLOTS} -ge 150 ] ; then
 fi
 
 echo "${DIRNAME}/${BASENAME}.defragment" > ${DIRNAME}/${BASENAME}.command
-$FSL_SUB -j $GENERATE_ID -T ${DEFRAGMENT_TIME} -l ${DIRNAME}/${BASENAME}_logs/ -N ${BASENAME}.defragment -t ${DIRNAME}/${BASENAME}.command
+$FSL_SUB -T ${DEFRAGMENT_TIME} -l ${DIRNAME}/${BASENAME}_logs/ -N ${BASENAME}.defragment -t ${DIRNAME}/${BASENAME}.command
