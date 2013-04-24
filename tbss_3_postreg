@@ -179,15 +179,18 @@ else
 
 fi
 
+# fsl_sub the following so we can request machines with loads of ram
+# this is a workaround for fslmaths/fslmerge badly handling large datasets
+memory="128g"
 echo "merging all upsampled FA images into single 4D image"
-${FSLDIR}/bin/fslmerge -t ../stats/all_FA `$FSLDIR/bin/imglob *_FA_to_target.*`
-cd ../stats
+$FSL_SUB -m n  -l tbss_logs -T 10 -N fslmerge -R $memory -B "${FSLDIR}/bin/fslmerge -t ../stats/all_FA `$FSLDIR/bin/imglob *_FA_to_target.*`"
 
 # create mean FA
 echo "creating valid mask and mean FA"
-$FSLDIR/bin/fslmaths all_FA -max 0 -Tmin -bin mean_FA_mask -odt char
-$FSLDIR/bin/fslmaths all_FA -mas mean_FA_mask all_FA
-$FSLDIR/bin/fslmaths all_FA -Tmean mean_FA
+cd ../stats
+$FSL_SUB -m n  -l ../FA/tbss_logs -T 10 -N mask_mean -R $memory -B  $FSLDIR/bin/fslmaths all_FA -max 0 -Tmin -bin mean_FA_mask -odt char
+$FSL_SUB -m n  -l ../FA/tbss_logs -T 10 -N mask_mean -R $memory -B  $FSLDIR/bin/fslmaths all_FA -mas mean_FA_mask all_FA
+$FSL_SUB -m n  -l ../FA/tbss_logs -T 10 -N mask_mean -R $memory -B  $FSLDIR/bin/fslmaths all_FA -Tmean mean_FA
 
 # create skeleton
 if [ $SKELETON = 0 ] ; then
