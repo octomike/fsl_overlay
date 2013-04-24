@@ -68,6 +68,9 @@
 #   University, to negotiate a licence. Contact details are:
 #   innovation@isis.ox.ac.uk quoting reference DE/9564.
 
+FSL_SUB=/usr/share/fsl/overlay/fsl_sub
+FSL_SUB=/home/mpib/krause/src/fsl/fsl_sub
+
 Usage() {
     echo ""
     echo "Usage: tbss_1_preproc <image1> <image2> ..."
@@ -82,30 +85,28 @@ echo [`date`] [`hostname`] [`uname -a`] [`pwd`] [$0 $@] >> .tbsslog
 mkdir -p FA
 mkdir -p origdata
 
+rm -f .commands
 for f in `$FSLDIR/bin/imglob $@` ; do
 
-cat >> .commands <<EOF
-echo processing $f
+    cmd="echo processing $f"
+    cmd=$cmd";f=$f"
 
-# erode a little and zero end slices
-X=`${FSLDIR}/bin/fslval $f dim1`; X=`echo "$X 2 - p" | dc -`
-Y=`${FSLDIR}/bin/fslval $f dim2`; Y=`echo "$Y 2 - p" | dc -`
-Z=`${FSLDIR}/bin/fslval $f dim3`; Z=`echo "$Z 2 - p" | dc -`
-$FSLDIR/bin/fslmaths $f -min 1 -ero -roi 1 $X 1 $Y 1 $Z 0 1 FA/${f}_FA
+    # erode a little and zero end slices
+    cmd="$cmd;"'X=`${FSLDIR}/bin/fslval $f dim1`;X=`echo "$X 2 - p" | dc -`'
+    cmd="$cmd;"'Y=`${FSLDIR}/bin/fslval $f dim2`;Y=`echo "$Y 2 - p" | dc -`'
+    cmd="$cmd;"'Z=`${FSLDIR}/bin/fslval $f dim3`;Z=`echo "$Z 2 - p" | dc -`'
+    cmd="$cmd;"'$FSLDIR/bin/fslmaths $f -min 1 -ero -roi 1 $X 1 $Y 1 $Z 0 1 FA/${f}_FA'
 
-# create mask (for use in FLIRT & FNIRT)
-$FSLDIR/bin/fslmaths FA/${f}_FA -bin FA/${f}_FA_mask
+    # create mask (for use in FLIRT & FNIRT)
+    cmd="$cmd;"'$FSLDIR/bin/fslmaths FA/${f}_FA -bin FA/${f}_FA_mask'
+    cmd="$cmd;"'$FSLDIR/bin/fslmaths FA/${f}_FA_mask -dilD -dilD -sub 1 -abs -add FA/${f}_FA_mask FA/${f}_FA_mask -odt char'
+    cmd="$cmd;"'$FSLDIR/bin/immv $f origdata'
 
-$FSLDIR/bin/fslmaths FA/${f}_FA_mask -dilD -dilD -sub 1 -abs -add FA/${f}_FA_mask FA/${f}_FA_mask -odt char
-
-$FSLDIR/bin/immv $f origdata
-EOF
-
-
+    echo $cmd >> .commands
 done
 
 # submit everything in .commands with chunksize $chunksize and wait for completion
-chunksize=8  # tweak me
+chunksize=4  # tweak me
 $FSL_SUB -l tbss_logs -T 1 -N tbss_1_preproc -t .commands -c $chunksize -B
 rm -f .commands
 
