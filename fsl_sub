@@ -153,6 +153,7 @@ $command -a darwin regscript rawdata outputdir ...
 
   -T <minutes>          Estimated job length in minutes, used to let SGE select
                         an appropriate queue
+  -R <memorysize>       Additional memory requirements (default = unset )
   -q <queuename>        Possible values for <queuename> can be queried with
                         'qconf -sql'
   -a <arch-name>        Architecture [e.g., darwin or lx24-amd64]
@@ -182,7 +183,7 @@ if [ $nargs -eq 0 ] ; then
   usage
 fi
 
-set -- `getopt T:q:a:p:M:j:t:c:z:N:BFvm:l:s: $*`
+set -- `getopt T:R:q:a:p:M:j:t:c:z:N:BFvm:l:s: $*`
 result=$?
 if [ $result != 0 ] ; then
   echo "What? Your arguments make no sense!"
@@ -262,6 +263,9 @@ while [ $1 != -- ] ; do
       else
         job_timelimit="-l h_rt=$(echo "$2 * 60" | bc)"
       fi
+      shift;;
+    -R)
+      sge_memory="-l mem=$2"
       shift;;
     -q)
       queue="$2"
@@ -435,7 +439,9 @@ case $METHOD in
 	if [ "x$tasks" = "x" ] ; then
 	    if [ $scriptmode -ne 1 ] ; then
 		    pbs_command="$qsub_cmd -V -d $PWD -r y $job_timelimit $queue $pe_options \
-                         -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold"
+                         -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch \
+                         $sge_hold $sge_memory"
+
 	    else
 		    pbs_command="$qsub_cmd $LogOpts $sge_arch $sge_hold"
 	    fi
@@ -443,14 +449,18 @@ case $METHOD in
 		    echo pbs_command: $pbs_command >&2
 		    echo executing: $@ >&2
 	    fi
-        jobid=$( echo $@ | $pbs_command | awk -F. '{print $1}' )
+        if [ $scriptmode -ne 1 ] ; then
+            jobid=$( echo $@ | $pbs_command | awk -F. '{print $1}' )
+        else
+            jobid=$( $pbs_command $@ | awk -F. '{print $1}' )
+        fi
         echo $jobid
         if [ $block -eq 1 ]; then
             wait_for_torque $jobid
         fi
 
     else
-	    pbs_command="$qsub_cmd -V -d $PWD $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_tasks"
+	    pbs_command="$qsub_cmd -V -d $PWD $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_tasks $sge_memory"
 	    if [ $verbose -eq 1 ] ; then
 		    echo pbs_command: $pbs_command >&2
 		    echo control file: $taskfile >&2
@@ -510,18 +520,18 @@ case $METHOD in
 
 	if [ "x$tasks" = "x" ] ; then
 	    if [ $scriptmode -ne 1 ] ; then
-		sge_command="$qsub_cmd -V -cwd -shell n -b y -r y $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_block"
+		sge_command="$qsub_cmd -V -cwd -shell n -b y -r y $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_block $sge_memory"
 	    else
 		sge_command="$qsub_cmd $LogOpts $sge_arch $sge_hold $sge_block"
 	    fi
-	    if [ $verbose -eq 1 ] ; then 
+	    if [ $verbose -eq 1 ] ; then
 		echo sge_command: $sge_command >&2
 		echo executing: $@ >&2
 	    fi
 	    exec $sge_command $@ | awk '{print $3}'
 	else
-	    sge_command="$qsub_cmd -V -cwd $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_tasks $sge_block"
-	    if [ $verbose -eq 1 ] ; then 
+	    sge_command="$qsub_cmd -V -cwd $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_tasks $sge_block $sge_memory"
+	    if [ $verbose -eq 1 ] ; then
 		echo sge_command: $sge_command >&2
 		echo control file: $taskfile >&2
 	    fi
