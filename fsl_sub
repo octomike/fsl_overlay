@@ -404,6 +404,7 @@ if [ "x$tasks" != "x" ] ; then
 fi
 
 wait_for_torque() {
+    echo "Waiting for jobs to finish."
     while(true); do
         sleep 30s
         qselect | grep "^$1" >/dev/null 2>&1
