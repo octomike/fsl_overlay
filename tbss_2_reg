@@ -96,7 +96,7 @@ do_reg(){
     done
 }
 
-[ "$1" = "" ] && Usage
+[ x"$1" = "x" ] || [ "$1" = "-h" ] && Usage
 
 echo [`date`] [`hostname`] [`uname -a`] [`pwd`] [$0 $@] >> .tbsslog
 
@@ -131,4 +131,4 @@ else
     do_reg target $all_list
 fi
 
-$FSL_SUB -l tbss_logs -T 60 -N tbss_2_reg -t .commands -c $chunksize
+$FSL_SUB -l tbss_logs -T 60 -N tbss_2_reg -t .commands -c $chunksize -B
