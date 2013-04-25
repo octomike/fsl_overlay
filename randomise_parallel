@@ -130,7 +130,7 @@ $FSL_SUB -T ${REQUESTED_TIME} -N ${BASENAME}.generate -l ${DIRNAME}/${BASENAME}_
 
 #stage2:
 cat <<combineScript > ${DIRNAME}/${BASENAME}.defragment
-#!/bin/sh
+#!/bin/bash
 echo "Merging stat images"
 for FIRSTSEED in ${ROOTNAME}_SEED1_*_p_*.nii.gz ${ROOTNAME}_SEED1_*_corrp_*.nii.gz ; do 
   ADDCOMMAND=""
