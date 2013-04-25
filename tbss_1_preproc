@@ -69,7 +69,6 @@
 #   innovation@isis.ox.ac.uk quoting reference DE/9564.
 
 FSL_SUB=/usr/share/fsl/overlay/fsl_sub
-FSL_SUB=/home/mpib/krause/src/fsl/fsl_sub
 
 Usage() {
     echo ""
@@ -78,7 +77,7 @@ Usage() {
     exit 1
 }
 
-[ "$1" = "" ] && Usage
+[ x"$1" = "x" ] || [ "$1" = "-h" ] && Usage
 
 echo [`date`] [`hostname`] [`uname -a`] [`pwd`] [$0 $@] >> .tbsslog
 
