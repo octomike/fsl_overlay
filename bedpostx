@@ -74,6 +74,8 @@
 #    fi
 #fi
 
+FSL_SUB=/usr/share/fsl/overlay/fsl_sub
+
 Usage() {
     echo ""
     echo "Usage: bedpostx <subject directory> [options]"
@@ -197,7 +199,8 @@ mkdir -p ${subjdir}.bedpostX/xfms
 echo Queuing preprocessing stages
 # don't setup email options, rely on fsl_sub's setting
 #preprocid=`${FSLDIR}/bin/fsl_sub -T 60 -m as -N bpx_preproc -l ${subjdir}.bedpostX/logs ${FSLDIR}/bin/bedpostx_preproc.sh ${subjdir} ${gflag}`
-preprocid=`${FSLDIR}/bin/fsl_sub -T 60 -N bpx_preproc -l ${subjdir}.bedpostX/logs ${FSLDIR}/bin/bedpostx_preproc.sh ${subjdir} ${gflag}`
+#preprocid=`${FSLDIR}/bin/fsl_sub -T 60 -N bpx_preproc -l ${subjdir}.bedpostX/logs ${FSLDIR}/bin/bedpostx_preproc.sh ${subjdir} ${gflag}`
+preprocid=$( ${FSL_SUB} -T 60 -N bpx_preproc -l ${subjdir}.bedpostX/logs -B ${FSLDIR}/bin/bedpostx_preproc.sh ${subjdir} ${gflag}  )
 
 echo Queuing parallel processing stage
 nslices=`${FSLDIR}/bin/fslval ${subjdir}/data dim3`
@@ -281,12 +284,14 @@ do
 done
 # don't specify a mailto address, but rely on fsl_sub doing it
 #bedpostid=`${FSLDIR}/bin/fsl_sub -j $preprocid -l ${subjdir}.bedpostX/logs -M $mailto -N bedpostx -t ${subjdir}.bedpostX/commands.txt`
-bedpostid=`${FSLDIR}/bin/fsl_sub -j $preprocid -l ${subjdir}.bedpostX/logs -N bedpostx -t ${subjdir}.bedpostX/commands.txt`
+#bedpostid=`${FSLDIR}/bin/fsl_sub -j $preprocid -l ${subjdir}.bedpostX/logs -N bedpostx -t ${subjdir}.bedpostX/commands.txt`
+bedpostid=$( ${FSL_SUB} -l ${subjdir}.bedpostX/logs -N bedpostx -t ${subjdir}.bedpostX/commands.txt -B )
 
 echo Queuing post processing stage
 # don't setup email options, rely on fsl_sub's setting
 #mergeid=`${FSLDIR}/bin/fsl_sub -j $bedpostid -T 60 -m as -N bpx_postproc -l ${subjdir}.bedpostX/logs ${FSLDIR}/bin/bedpostx_postproc.sh $subjdir`
-mergeid=`${FSLDIR}/bin/fsl_sub -j $bedpostid -T 60 -N bpx_postproc -l ${subjdir}.bedpostX/logs ${FSLDIR}/bin/bedpostx_postproc.sh $subjdir`
+#mergeid=`${FSLDIR}/bin/fsl_sub -j $bedpostid -T 60 -N bpx_postproc -l ${subjdir}.bedpostX/logs ${FSLDIR}/bin/bedpostx_postproc.sh $subjdir`
+mergeid=$(${FSL_SUB} -T 60 -N bpx_postproc -l ${subjdir}.bedpostX/logs -B ${FSLDIR}/bin/bedpostx_postproc.sh $subjdir)
 
 # Don't be SGE-specific -- rely on FSLPARALLEL
 #[ "x$SGE_ROOT" = "x" ] && kill -USR1 $monitorpid
