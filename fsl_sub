@@ -466,18 +466,19 @@ case $METHOD in
 		    echo pbs_command: $pbs_command >&2
 		    echo control file: $taskfile >&2
 	    fi
-        echo 'chunk_beg=$(( (${PBS_ARRAYID} - 1) * '" $chunksize + 1 ))" > tmpjob
-        echo 'chunk_end=$(( ${PBS_ARRAYID} * '" $chunksize ))" >> tmpjob
-        echo 'cmd=$(sed -n -e "${chunk_beg},${chunk_end}p"' $taskfile ')' >> tmpjob
-        echo '/bin/sh <<EOS' >> tmpjob
-        echo '$cmd' >> tmpjob
-        echo 'EOS' >> tmpjob
-	    jobid=$( $pbs_command tmpjob | awk -F. '{print $1}' )
+        tmpjobfile=tmpjob.$$
+        echo 'chunk_beg=$(( (${PBS_ARRAYID} - 1) * '" $chunksize + 1 ))" > $tmpjobfile
+        echo 'chunk_end=$(( ${PBS_ARRAYID} * '" $chunksize ))" >> $tmpjobfile
+        echo 'cmd=$(sed -n -e "${chunk_beg},${chunk_end}p"' $taskfile ')' >> $tmpjobfile
+        echo '/bin/sh <<EOS' >> $tmpjobfile
+        echo '$cmd' >> $tmpjobfile
+        echo 'EOS' >> $tmpjobfile
+	    jobid=$( $pbs_command $tmpjobfile | awk -F. '{print $1}' )
         echo $jobid
         if [ $block -eq 1 ]; then
             wait_for_torque $jobid
+            rm -f $tmpjobfile
         fi
-        rm -f tmpjob
     fi
     ;;
 
@@ -536,13 +537,14 @@ case $METHOD in
 		echo sge_command: $sge_command >&2
 		echo control file: $taskfile >&2
 	    fi
-        echo 'chunk_beg=$(( (${SGE_TASK_ID} - 1) * '" $chunksize + 1 ))" > tmpjob
-        echo 'chunk_end=$(( ${SGE_TASK_ID} * '" $chunksize ))" >> tmpjob
-        echo 'cmd=$(sed -n -e "${chunk_beg},${chunk_end}p"' $taskfile ')' >> tmpjob
-        echo '/bin/sh <<EOS' >> tmpjob
-        echo '$cmd' >> tmpjob
-        echo 'EOS' >> tmpjob
-	    exec $sge_command tmpjob | awk '{print $3}' | awk -F. '{print $1}'
+        tmpjobfile=tmpjob.$$
+        echo 'chunk_beg=$(( (${SGE_TASK_ID} - 1) * '" $chunksize + 1 ))" > $tmpjobfile
+        echo 'chunk_end=$(( ${SGE_TASK_ID} * '" $chunksize ))" >> $tmpjobfile
+        echo 'cmd=$(sed -n -e "${chunk_beg},${chunk_end}p"' $taskfile ')' >> $tmpjobfile
+        echo '/bin/sh <<EOS' >> $tmpjobfile
+        echo '$cmd' >> $tmpjobfile
+        echo 'EOS' >> $tmpjobfile
+	    exec $sge_command $tmpjobfile | awk '{print $3}' | awk -F. '{print $1}'
 	fi
 	;;
 
