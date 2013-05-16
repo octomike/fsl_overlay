@@ -194,14 +194,15 @@ $FSL_SUB -m n  -l ../FA/tbss_logs -T 1440 -N mask_mean -R $memory -B  $FSLDIR/bi
 $FSL_SUB -m n  -l ../FA/tbss_logs -T 1440 -N mask_mean -R $memory -B  $FSLDIR/bin/fslmaths all_FA -Tmean mean_FA
 
 # create skeleton
+_SUB="$FSL_SUB -m n -l ../FA/tbss_logs -T 120 -N skeletonising -R $memory -B"
 if [ $SKELETON = 0 ] ; then
     echo "skeletonising mean FA"
-    $FSLDIR/bin/tbss_skeleton -i mean_FA -o mean_FA_skeleton
+    $_SUB $FSLDIR/bin/tbss_skeleton -i mean_FA -o mean_FA_skeleton
 else
-    $FSLDIR/bin/fslmaths $FSLDIR/data/standard/FMRIB58_FA_1mm -mas mean_FA_mask mean_FA
-    $FSLDIR/bin/fslmaths mean_FA -bin mean_FA_mask
-    $FSLDIR/bin/fslmaths all_FA -mas mean_FA_mask all_FA
-    $FSLDIR/bin/imcp $FSLDIR/data/standard/FMRIB58_FA-skeleton_1mm mean_FA_skeleton
+    $_SUB $FSLDIR/bin/fslmaths $FSLDIR/data/standard/FMRIB58_FA_1mm -mas mean_FA_mask mean_FA
+    $_SUB $FSLDIR/bin/fslmaths mean_FA -bin mean_FA_mask
+    $_SUB $FSLDIR/bin/fslmaths all_FA -mas mean_FA_mask all_FA
+    $_SUB $FSLDIR/bin/imcp $FSLDIR/data/standard/FMRIB58_FA-skeleton_1mm mean_FA_skeleton
 fi
 
 echo "now view mean_FA_skeleton to check whether the default threshold of 0.2 needs changing, when running:"
