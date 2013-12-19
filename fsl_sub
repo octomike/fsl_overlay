@@ -167,6 +167,8 @@ $command -a darwin regscript rawdata outputdir ...
   -l <logdirname>       Where to output logfiles
   -m <mailoptions>      Change the SGE mail options, see qsub for details
   -z <output>           If <output> image or file already exists, do nothing and exit
+  -P <prologue>         Runs <prologue> script before job, if supported.
+  -E <epilogue>         Runs <epilogue> script after job, if supported.
   -F                    Use flags embedded in scripts to set SGE queuing options
   -s <pename>,<threads> Submit a multi-threaded task - requires a PE (<pename>) to be
                         configured for the requested queues.
@@ -183,7 +185,7 @@ if [ $nargs -eq 0 ] ; then
   usage
 fi
 
-set -- `getopt T:R:q:a:p:M:j:t:c:z:N:BFvm:l:s: $*`
+set -- `getopt T:R:q:a:p:M:j:t:c:z:P:E:N:BFvm:l:s: $*`
 result=$?
 if [ $result != 0 ] ; then
   echo "What? Your arguments make no sense!"
@@ -333,6 +335,20 @@ while [ $1 != -- ] ; do
       LogDir="${2}/";
       mkdir -p $2;
       shift;;
+    -P)
+      if [ -f $2 ]; then
+        pbs_prologue="-l prologue=$2"
+      else
+        echo "Error: prologue script not found"
+      fi
+      shift;;
+    -E)
+      if [ -f $2 ]; then
+        pbs_epilogue="-l epilogue=$2"
+      else
+        echo "Error: epilogue script not found"
+      fi
+      shift;;
     -F)
       scriptmode=1;
       if [ $FSLPARALLEL = "torque" ]; then
@@ -441,7 +457,7 @@ case $METHOD in
 	    if [ $scriptmode -ne 1 ] ; then
 		    pbs_command="$qsub_cmd -V -d $PWD -r y $job_timelimit $queue $pe_options \
                          -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch \
-                         $sge_hold $sge_memory"
+                         $sge_hold $sge_memory $pbs_prologue $pbs_epilogue"
 
 	    else
 		    pbs_command="$qsub_cmd $LogOpts $sge_arch $sge_hold"
@@ -461,7 +477,10 @@ case $METHOD in
         fi
 
     else
-	    pbs_command="$qsub_cmd -V -d $PWD $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_tasks $sge_memory"
+	    pbs_command="$qsub_cmd -V -d $PWD $job_timelimit $queue $pe_options\
+                     -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch\
+                     $sge_hold $sge_tasks $sge_memory $pbs_prologue\
+                     $pbs_epilogue"
 	    if [ $verbose -eq 1 ] ; then
 		    echo pbs_command: $pbs_command >&2
 		    echo control file: $taskfile >&2
