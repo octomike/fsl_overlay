@@ -320,7 +320,6 @@ while [ $1 != -- ] ; do
       shift;;
     -T)
       map_qname $2
-      shift;;
       # qsub wants the time limit in seconds
       if [ $FSLPARALLEL = "torque" ] ; then
         job_timelimit="-l walltime=$(echo "$2 * 60" | bc)"
