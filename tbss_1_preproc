@@ -1,6 +1,6 @@
 #!/bin/sh
 
-#   tbss_2_reg - TBSS nonlinear registration
+#   tbss_1_preproc - preprocess FA data for TBSS
 #
 #   Stephen Smith, FMRIB Image Analysis Group
 #
@@ -70,64 +70,41 @@
 export LC_ALL=C
 
 Usage() {
-    cat <<EOF
-
-Usage: tbss_2_reg [options]
-
-Target-selection options - choose ONE of:
- -T            : use FMRIB58_FA_1mm as target for nonlinear registrations (recommended)
- -t <target>   : use <target> image as target for nonlinear registrations
- -n            : find best target from all images in FA
-
-EOF
+    echo ""
+    echo "Usage: tbss_1_preproc <image1> <image2> ..."
+    echo ""
     exit 1
-}
-
-do_reg(){
-
-    f=$1
-
-    for g in `$FSLDIR/bin/imglob *_FA.*` ; do
-        	
-	o=${g}_to_$f
-	
-	if [ ! -f ${o}_warp.msf ] ; then
-	    echo $o
-	    touch ${o}_warp.msf
-	    echo "$FSLDIR/bin/fsl_reg $g $f ${g}_to_$f -e -FA" >> .commands
-	fi
-	
-    done
 }
 
 [ "$1" = "" ] && Usage
 
 echo [`date`] [`hostname`] [`uname -a`] [`pwd`] [$0 $@] >> .tbsslog
 
-/bin/rm -f FA/.commands
+mkdir -p FA
+mkdir -p origdata
 
-if [ $1 = -n ] ; then
-    cd FA
-    for f in `$FSLDIR/bin/imglob *_FA.*` ; do
-	do_reg $f
-    done
-else
-    if [ $1 = -T ] ; then
-	TARGET=$FSLDIR/data/standard/FMRIB58_FA_1mm
-    elif [ $1 = -t ] ; then
-	TARGET=$2
-    else
-	Usage
-    fi
-    if [ `${FSLDIR}/bin/imtest $TARGET` = 0 ] ; then
-	echo ""
-	echo "Error: target image $TARGET not valid"
-	Usage
-    fi
-    $FSLDIR/bin/imcp $TARGET FA/target
-    cd FA
-    do_reg target
-fi
+for f in `$FSLDIR/bin/imglob $@` ; do
 
-${FSLDIR}/bin/fsl_sub -l tbss_logs -T 60 -N tbss_2_reg -t .commands
+    echo processing $f
+
+    # erode a little and zero end slices
+    X=`${FSLDIR}/bin/fslval $f dim1`; X=`echo "$X 2 - p" | dc -`
+    Y=`${FSLDIR}/bin/fslval $f dim2`; Y=`echo "$Y 2 - p" | dc -`
+    Z=`${FSLDIR}/bin/fslval $f dim3`; Z=`echo "$Z 2 - p" | dc -`
+    $FSLDIR/bin/fslmaths $f -min 1 -ero -roi 1 $X 1 $Y 1 $Z 0 1 FA/${f}_FA
+
+    # create mask (for use in FLIRT & FNIRT)
+    $FSLDIR/bin/fslmaths FA/${f}_FA -bin FA/${f}_FA_mask
+
+    $FSLDIR/bin/fslmaths FA/${f}_FA_mask -dilD -dilD -sub 1 -abs -add FA/${f}_FA_mask FA/${f}_FA_mask -odt char
+
+    $FSLDIR/bin/immv $f origdata
+	
+done
+
+echo "Now running \"slicesdir\" to generate report of all input images"
+cd FA
+$FSLDIR/bin/slicesdir `$FSLDIR/bin/imglob *_FA.*` > grot 2>&1
+cat grot | tail -n 2
+/bin/rm grot
 

@@ -1,7 +1,7 @@
 #!/bin/sh
 
-# Copyright (C) 2007-2010 University of Oxford
-# Authors: Dave Flitney, Stephen Smith and Matthew Webster
+# Copyright (C) 2007-2014 University of Oxford
+# Authors: Dave Flitney, Stephen Smith, Matthew Webster and Duncan Mortimer
 
 #   Part of FSL - FMRIB's Software Library
 #   http://www.fmrib.ox.ac.uk/fsl
@@ -64,45 +64,39 @@
 #   Innovation Limited ("Isis"), the technology transfer company of the
 #   University, to negotiate a licence. Contact details are:
 #   innovation@isis.ox.ac.uk quoting reference DE/9564.
+export LC_ALL=C
 
 ###########################################################################
 # Edit this file in order to setup FSL to use your local compute
 # cluster.
 ###########################################################################
 
-fslcluster_cell_settings=/usr/local/share/sge/default/common/settings.sh
 # Domain mail should be sent to if necessary. The complete address will be
 # `whoami`@${fslcluster_mailto_domain}
 fslcluster_mailto_domain=localhost
 # When should the cluster engine send status email (see qsub -m ... docs)
 # Don't send email by default; can be overidden by FSLCLUSTER_MAILOPTS
 # environment variable
-fslcluster_mailopts="n"
-
+fslcluster_mailopts="${FSLCLUSTER_MAILOPTS:-n}"
 
 ###########################################################################
 # The following section determines what to do when fsl_sub is called
-# by an FSL program. If it finds a local cluster if will pass the
-# commands onto the cluster. Otherwise it will run the commands
+# by an FSL program. If SGE_ROOT is set it will attempt to pass the
+# commands onto the cluster, otherwise it will run the commands
 # itself. There are two values for the METHOD variable, "SGE" and
-# "NONE". You should setup the tests to look for whether the calling
-# computer can see your cluster setup scripts, and run them (if that's
-# what you want, i.e. if you haven't already run them in the user's
-# login scripts). Note that these tests look for the environment
-# variable SGE_ROOT, which a user can unset if they don't want the
+# "NONE". Note that a user can unset SGE_ROOT if they don't want the
 # cluster to be used.
 ###########################################################################
-
-# try autodetecting SGE, but see ovveride switch FSLPARALLEL below
 METHOD=SGE
+unset module
 if [ "x$SGE_ROOT" = "x" ] ; then
-    if [ -f ${fslcluster_cell_settings} ] ; then
-	. ${fslcluster_cell_settings}
-    elif [ -f /usr/local/sge/default/common/settings.sh ] ; then
-	. /usr/local/sge/default/common/settings.sh
-    else
 	METHOD=NONE
-    fi
+else
+	QCONF=`which qconf`
+	if [ "x$QCONF" = "x" ]; then
+		METHOD=NONE
+		echo "Warning: SGE_ROOT environment variable is set but Grid Engine software not found, will run locally" >&2
+	fi
 fi
 
 # define the default 'qsub' implementation to be used for cluster submission
@@ -119,17 +113,59 @@ if [ -n "$FSLPARALLEL" ] ; then
         # if condor shall be used, simply switch to Condor's qsub emulation
         qsub_cmd="condor_qsub"
     fi
+else
+    METHOD=NONE
 fi
 
-# Allow overriding mail settings
-if [ "x$FSLCLUSTER_MAILOPTS" != "x" ] ; then
-    fslcluster_mailopts=${FSLCLUSTER_MAILOPTS}
+# stop submitted scripts from submitting jobs themselves
+if [ "X$FSLSUBALREADYRUN" = "Xtrue" ] ; then
+    METHOD=NONE
+    echo "Warning: job on queue attempted to submit parallel jobs - running jobs serially instead" >&2
 fi
+
+if [ "X$METHOD" = "XNONE" ]; then
+	QCONF=echo
+fi
+FSLSUBALREADYRUN=true
+export FSLSUBALREADYRUN
+
+###########################################################################
+# The following auto-decides what cluster queue to use. The calling
+# FSL program will probably use the -T option when calling fsl_sub,
+# which tells fsl_sub how long (in minutes) the process is expected to
+# take (in the case of the -t option, how long each line in the
+# supplied file is expected to take). You need to setup the following
+# list to map ranges of timings into your cluster queues - it doesn't
+# matter how many you setup, that's up to you.
+###########################################################################
+
+map_qname ()
+{
+	# for Debian we can't do the stuff below, because it would be hard
+	# to determine how particular queues are meant to be used on any given
+	# system. Instead of translating into a queue name we specify proper
+	# resource limits, and let SGE decide what queue matches
+	# (qsub wants the time limit in seconds)
+	queueCmd="$queueCmd -l h_rt=$(echo "$1 * 60" | bc)"
+    #if [ $1 -le 20 ] ; then
+	#queue=veryshort.q
+    #elif [ $1 -le 120 ] ; then
+	#queue=short.q
+    #elif [ $1 -le 1440 ] ; then
+	#queue=long.q
+    #else
+	#queue=verylong.q
+    #fi
+    #queueCmd=" -q $queue "
+
+    #echo "Estimated time was $1 mins: queue name is $queue"
+}
 
 ###########################################################################
 # Don't change the following (but keep scrolling down!)
 ###########################################################################
 
+OLD_POSIXLY_CORRECT=${POSIXLY_CORRECT}
 POSIXLY_CORRECT=1
 export POSIXLY_CORRECT
 command=`basename $0`
@@ -164,10 +200,27 @@ $command -a darwin regscript rawdata outputdir ...
                         configured for the requested queues.
                         <threads> specifies the number of threads to run
   -v                    Verbose mode.
+
 EOF
 
   exit 1
 }
+# This part of the help is not applicable anymore
+#
+#Queues:
+#
+#There are several batch queues configured on the cluster, each with defined CPU
+#time limits. All queues, except bigmem.q, have a 8GB memory limit.
+#
+#veryshort.q:This queue is for jobs which last under 30mins.
+#short.q:    This queue is for jobs which last up to 4h. 
+#long.q:     This queue is for jobs which last less than 24h. Jobs run with a
+#            nice value of 10.
+#verylong.q: This queue is for jobs which will take longer than 24h CPU time.
+#            There is one slot per node, and jobs on this queue have a nice value
+#            of 15.
+#bigmem.q:   This queue is like the verylong.q but has no memory limits.
+
 
 nargs=$#
 if [ $nargs -eq 0 ] ; then
@@ -184,6 +237,10 @@ if [ $nargs -eq 0 ] || [ $result != 0 ] ; then
   usage
 fi
 
+POSIXLY_CORRECT=${OLD_POSIXLY_CORRECT}
+export POSIXLY_CORRECT
+
+
 ###########################################################################
 # If you have a Parallel Environment configured for OpenMP tasks then
 # the variable omp_pe should be set to the name you have defined for that
@@ -198,8 +255,11 @@ omp_pe='openmp'
 # change. It also sets up the basic emailing control.
 ###########################################################################
 
-# SGE should already have a default queue
-#queue=long.q
+# SGE should already have a default queue, but allow for overwrite
+queueCmd=""
+if [ "x$FSLCLUSTER_DEFAULT_QUEUE" != "x" ] ; then
+    queueCmd=" -q $FSLCLUSTER_DEFAULT_QUEUE "
+fi
 mailto=`whoami`@${fslcluster_mailto_domain}
 MailOpts=${fslcluster_mailopts}
 
@@ -246,12 +306,12 @@ while [ $1 != -- ] ; do
       fi
       shift;;
     -T)
-      # qsub wants the time limit in seconds
-      job_timelimit="-l h_rt=$(echo "$2 * 60" | bc)"
+      map_qname $2
       shift;;
     -q)
-      queue="-q $2"
-      qconf -sql | grep ^$queue 2>&1 >/dev/null
+      queue=$2
+      queueCmd=" -q $queue " 
+      $QCONF -sq $queue >/dev/null 2>&1
       if [ $? -eq 1 ]; then
 	  echo "Invalid queue specified!"
 	  exit 127
@@ -285,8 +345,19 @@ while [ $1 != -- ] ; do
       shift;;
     -t)
       taskfile=$2
-      tasks=`wc -l $taskfile | awk '{print $1}'`
-      sge_tasks="-t 1-$tasks"
+      if [ -f "$taskfile" ] ; then
+	      tasks=`wc -l $taskfile | awk '{print $1}'`
+	      if [ $tasks -ne 0 ]; then
+    	  	sge_tasks="-t 1-$tasks"
+    	  else
+    	    echo "Task file ${taskfile} is empty"
+    	    echo "Should be a text file listing all the commands to run!"
+    	    exit -1
+    	  fi
+      else
+          echo "Task file (${taskfile}) does not exist"
+          exit -1
+      fi
       shift;;
     -N)
       JobName=$2;
@@ -297,7 +368,15 @@ while [ $1 != -- ] ; do
     -l)
       LogOpts="-o $2 -e $2";
       LogDir="${2}/";
-      mkdir -p $2;
+      if [ ! -e ${2} ]; then 
+	  mkdir -p $2
+      else
+	  echo ${2} | grep '/dev/null' >/dev/null 2>&1
+	  if [ $? -eq 1 ] && [ -f ${2} ]; then
+	      echo "Log destination is a file (should be a folder)"
+	      exit -1
+	  fi
+      fi
       shift;;
     -F)
       scriptmode=1;
@@ -319,6 +398,19 @@ shift
 # Don't change the following (but keep scrolling down!)
 ###########################################################################
 
+if [ -z "$taskfile" ] && [ -z "$1" ]; then
+	echo "Either supply a command to run or a parallel task file"
+	exit -1
+fi
+
+if [ -z "$taskfile" ] && [ ! -x "$1" ]; then
+	which $1 >/dev/null 2>&1
+	if [ $? -ne 0 ]; then
+		echo "The command you have requested cannot be found or is not executable"
+		exit -1
+	fi
+fi
+
 if [ "x$JobName" = x ] ; then 
     if [ "x$taskfile" != x ] ; then
 	JobName=`basename $taskfile`
@@ -327,15 +419,9 @@ if [ "x$JobName" = x ] ; then
     fi
 fi
 
-if [ "x$tasks" != x ] && [ ! -f "$taskfile" ] ; then
-    echo $taskfile: invalid input!
-    echo Should be a text file listing all the commands to run!
-    exit -1
-fi
-
 if [ "x$tasks" != "x" ] && [ "x$@" != "x" ] ; then
-    echo $@
-    echo Spurious input after parsing command line!
+    echo "Spurious input after parsing command line: \"$@\"!"
+    echo "You appear to have specified both a task file and a command to run"
     exit -1
 fi
 
@@ -365,7 +451,7 @@ case $METHOD in
 	if [ "x$peName" != x ]; then
             # Is this a configured PE?
 
-	    qconf -spl | grep ^$peName 2>&1 >/dev/null
+	    $QCONF -sp $peName >/dev/null 2>&1
 
 	    if [ $? -eq 1 ]; then
 		echo $@
@@ -373,15 +459,20 @@ case $METHOD in
 		exit -1
 	    fi
 
+		if [ "x$queue" = "x" ] ; then
+		echo $@
+		echo "No queue specified."
+		exit -1
+	    fi
             # Get a list of queues configured for this PE and confirm that the queue
             # we have submitted to has that PE set up.
-	    qstat -g c -pe $peName 2>&1 >/dev/null
+	    qstat -g c -pe $peName >/dev/null 2>&1
 	    if [ $? -eq 1 ]; then
 		echo "No parallel environments configured!"
 		exit -1
 	    fi
 
-	    qstat -g c -pe $peName | sed '1,2d' | awk '{ print $1 }' | grep ^$queue 2>&1 >/dev/null
+	    qstat -g c -pe $peName | sed '1,2d' | awk '{ print $1 }' | grep ^$queue >/dev/null 2>&1
 
 	    if [ $? -eq 1 ]; then
 		echo $@
@@ -397,7 +488,7 @@ case $METHOD in
 
 	if [ "x$tasks" = "x" ] ; then
 	    if [ $scriptmode -ne 1 ] ; then
-		sge_command="$qsub_cmd -V -cwd -shell n -b y -r y $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold"
+		sge_command="$qsub_cmd -V -cwd -shell n -b y -r y $queueCmd $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold"
 	    else
 		sge_command="$qsub_cmd $LogOpts $sge_arch $sge_hold"
 	    fi
@@ -407,7 +498,7 @@ case $METHOD in
 	    fi
 	    exec $sge_command $@ | awk '{print $3}'
 	else
-	    sge_command="$qsub_cmd -V -cwd $job_timelimit $queue $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_tasks"
+	    sge_command="$qsub_cmd -V -cwd $queueCmd $pe_options -M $mailto -N $JobName -m $MailOpts $LogOpts $sge_arch $sge_hold $sge_tasks"
 	    if [ $verbose -eq 1 ] ; then 
 		echo sge_command: $sge_command >&2
 		echo control file: $taskfile >&2

@@ -1,6 +1,6 @@
 #!/bin/sh
 
-#   tbss_2_reg - TBSS nonlinear registration
+#   tbss_4_prestats - post-registration processing
 #
 #   Stephen Smith, FMRIB Image Analysis Group
 #
@@ -72,62 +72,35 @@ export LC_ALL=C
 Usage() {
     cat <<EOF
 
-Usage: tbss_2_reg [options]
+Usage: tbss_4_prestats <threshold>
 
-Target-selection options - choose ONE of:
- -T            : use FMRIB58_FA_1mm as target for nonlinear registrations (recommended)
- -t <target>   : use <target> image as target for nonlinear registrations
- -n            : find best target from all images in FA
+The normal recommendation for <threshold> is 0.2
 
 EOF
     exit 1
-}
-
-do_reg(){
-
-    f=$1
-
-    for g in `$FSLDIR/bin/imglob *_FA.*` ; do
-        	
-	o=${g}_to_$f
-	
-	if [ ! -f ${o}_warp.msf ] ; then
-	    echo $o
-	    touch ${o}_warp.msf
-	    echo "$FSLDIR/bin/fsl_reg $g $f ${g}_to_$f -e -FA" >> .commands
-	fi
-	
-    done
 }
 
 [ "$1" = "" ] && Usage
 
 echo [`date`] [`hostname`] [`uname -a`] [`pwd`] [$0 $@] >> .tbsslog
 
-/bin/rm -f FA/.commands
+thresh=$1
 
-if [ $1 = -n ] ; then
-    cd FA
-    for f in `$FSLDIR/bin/imglob *_FA.*` ; do
-	do_reg $f
-    done
-else
-    if [ $1 = -T ] ; then
-	TARGET=$FSLDIR/data/standard/FMRIB58_FA_1mm
-    elif [ $1 = -t ] ; then
-	TARGET=$2
-    else
-	Usage
-    fi
-    if [ `${FSLDIR}/bin/imtest $TARGET` = 0 ] ; then
-	echo ""
-	echo "Error: target image $TARGET not valid"
-	Usage
-    fi
-    $FSLDIR/bin/imcp $TARGET FA/target
-    cd FA
-    do_reg target
-fi
+cd stats
 
-${FSLDIR}/bin/fsl_sub -l tbss_logs -T 60 -N tbss_2_reg -t .commands
+echo "creating skeleton mask using threshold $thresh"
+echo $thresh > thresh.txt
+${FSLDIR}/bin/fslmaths mean_FA_skeleton -thr $thresh -bin mean_FA_skeleton_mask
+
+echo "creating skeleton distancemap (for use in projection search)"
+${FSLDIR}/bin/fslmaths mean_FA_mask -mul -1 -add 1 -add mean_FA_skeleton_mask mean_FA_skeleton_mask_dst
+${FSLDIR}/bin/distancemap -i mean_FA_skeleton_mask_dst -o mean_FA_skeleton_mask_dst
+
+echo "projecting all FA data onto skeleton"
+${FSLDIR}/bin/tbss_skeleton -i mean_FA -p $thresh mean_FA_skeleton_mask_dst ${FSLDIR}/data/standard/LowerCingulum_1mm all_FA all_FA_skeletonised
+
+echo ""
+echo "now run stats - for example:"
+echo "randomise -i all_FA_skeletonised -o tbss -m mean_FA_skeleton_mask -d design.mat -t design.con -n 500 --T2 -V"
+echo "(after generating design.mat and design.con)"
 
