@@ -62,6 +62,7 @@
 #   Innovation Limited ("Isis"), the technology transfer company of the
 #   University, to negotiate a licence. Contact details are:
 #   innovation@isis.ox.ac.uk quoting reference DE/9564.
+export LC_ALL=C
 Usage () {
     echo ""
     echo "Usage: tbss_x <listOfScalarDirectories> <listOfVectorDirectories>"

@@ -62,10 +62,10 @@
 #   Innovation Limited ("Isis"), the technology transfer company of the
 #   University, to negotiate a licence. Contact details are:
 #   innovation@isis.ox.ac.uk quoting reference DE/9564.
-#
 
 FSL_SUB=/usr/share/fsl/overlay/fsl_sub
 
+export LC_ALL=C
 if [ $# -le 3 ] ; then
   echo "$0 <randomise options>"
   echo ""
@@ -105,6 +105,7 @@ fi
 PERMS_PER_CONTRAST=`expr $PERMS_PER_SLOT \* $SLOTS_PER_CONTRAST`
 
 REQUESTED_SLOTS=`expr $CONTRASTS \* $SLOTS_PER_CONTRAST`
+
 CORRECTED_PERMS=`expr $PERMS_PER_CONTRAST - $SLOTS_PER_CONTRAST`
 CORRECTED_PERMS=`expr $CORRECTED_PERMS + 1`
 
@@ -178,6 +179,8 @@ while [ \$ACTIVESEED -le $SLOTS_PER_CONTRAST ] ; do
   rm -rf ${ROOTNAME}_SEED\${ACTIVESEED}*stat???.nii.gz
   rm -rf ${ROOTNAME}_SEED\${ACTIVESEED}*stat??.nii.gz
   rm -rf ${ROOTNAME}_SEED\${ACTIVESEED}*stat?.nii.gz
+  rm -rf ${ROOTNAME}_SEED\${ACTIVESEED}_*perm_*.txt ${ROOTNAME}_SEED\${ACTIVESEED}_*_p_*.txt ${ROOTNAME}_SEED\${ACTIVESEED}_*_corrp_*.txt
+
   ACTIVESEED=\`expr \$ACTIVESEED + 1\`
 done
  

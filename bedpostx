@@ -1,6 +1,6 @@
 #!/bin/sh
 
-#   Copyright (C) 2004 University of Oxford
+#   Copyright (C) 2004,2013 University of Oxford
 #
 #   Part of FSL - FMRIB's Software Library
 #   http://www.fmrib.ox.ac.uk/fsl
@@ -64,17 +64,8 @@
 #   University, to negotiate a licence. Contact details are:
 #   innovation@isis.ox.ac.uk quoting reference DE/9564.
 
-# No need to try detecting SGE, instead rely on FSLPARALLEL to indicate
-# a present cluster engine. All engine specific code go into fsl_sub
-#if [ "x$SGE_ROOT" = "x" ] ; then
-#    if [ -f /usr/local/share/sge/default/common/settings.sh ] ; then
-#	. /usr/local/share/sge/default/common/settings.sh
-#    elif [ -f /usr/local/sge/default/common/settings.sh ] ; then
-#	. /usr/local/sge/default/common/settings.sh
-#    fi
-#fi
-
 FSL_SUB=/usr/share/fsl/overlay/fsl_sub
+export LC_ALL=C
 
 Usage() {
     echo ""
@@ -82,7 +73,7 @@ Usage() {
     echo ""
     echo "expects to find bvals and bvecs in subject directory"
     echo "expects to find data and nodif_brain_mask in subject directory"
-#   echo "expects to find grad_dev in subject directory, if -g is set"
+    echo "expects to find grad_dev in subject directory, if -g is set"
     echo "options (old syntax)"
     echo "-n (number of fibres per voxel, default 2)"
     echo "-w (ARD weight, more weight means less secondary fibres per voxel, default 1)"
@@ -90,7 +81,8 @@ Usage() {
     echo "-j (number of jumps, default 1250)"
     echo "-s (sample every, default 25)"
     echo "-model (1 for monoexponential, 2 for multiexponential, default 1)"
-#   echo "-g (consider gradient nonlinearities, default off)"
+    echo "-g (consider gradient nonlinearities, default off)"
+    echo "-c do not use CUDA capable hardware/queue (if found)"
     echo ""
     echo ""
     echo "ALTERNATIVELY: you can pass on xfibres options onto directly bedpostx"
@@ -100,6 +92,55 @@ Usage() {
     echo ""
     echo "Note: Use EITHER old OR new syntax."
     exit 1
+}
+
+monitor(){
+    cat <<EOM > ${subjdir}.bedpostX/monitor
+#!/bin/sh
+echo
+echo "----- Bedpostx Monitor -----"
+finished=0
+lastprinted=0
+havedad=2
+while [ \$finished -eq 0 ] ; do
+    nfin=0
+    slice=0
+    errorFiles=\`ls ${subjdir}.bedpostX/logs/*.e* 2> /dev/null \`
+    for errorFile in \$errorFiles
+    do
+        if [ -s \$errorFile ]; then
+            echo An error ocurred. Please check file \$errorFile
+            kill -9 $$
+            exit 1
+        fi
+    done
+    while [ \$slice -le $nslices ];do
+        if [ -e ${subjdir}.bedpostX/logs/monitor/\$slice ]; then
+            nfin=\$((\$nfin + 1))
+        fi
+        slice=\$((\$slice + 1))
+    done
+    newmessages=\$((\$nfin - \$lastprinted))
+    while [ "\$newmessages" -gt 0 ];do
+        lastprinted=\$((\$lastprinted + 1))
+        echo \$lastprinted slices processed out of $nslices
+        newmessages=\$((\$newmessages - 1))
+    done
+    if [ -f ${subjdir}.bedpostX/xfms/eye.mat ] ; then
+        finished=1
+        echo "All slices processed"
+	exit 
+    fi
+    if [ ! \$havedad -gt 0 ]; then
+       exit 0
+    fi
+    if [ "x$SGE_ROOT" = "x" ]; then
+        havedad=\`ps -e -o pid | grep "$$\\b" | wc -l\`        
+    fi
+    sleep 180;
+done
+EOM
+    chmod +x ${subjdir}.bedpostX/monitor
 }
 
 make_absolute(){
@@ -117,10 +158,9 @@ make_absolute(){
 
 [ "$1" = "" ] && Usage
 
+myopts="$@"
 subjdir=`make_absolute $1`
 subjdir=`echo $subjdir | sed 's/\/$/$/g'`
-
-echo subjectdir is $subjdir
 
 #parse option arguments
 nfibres=2
@@ -130,6 +170,8 @@ njumps=1250
 sampleevery=25
 model=1
 gflag=0
+nocuda=0
+other=""
 
 shift
 while [ ! -z "$1" ]
@@ -141,15 +183,30 @@ do
       -j) njumps=$2;shift;;
       -s) sampleevery=$2;shift;;
       -model) model=$2;shift;;
-      -g) gflag=1;; 
-      *) break;;
+      -g) gflag=1;;
+      -c) nocuda=1;;
+      *) other=$other" "$1;;
   esac
   shift
 done
 opts="--nf=$nfibres --fudge=$fudge --bi=$burnin --nj=$njumps --se=$sampleevery --model=$model"
 defopts="--cnonlinear"
-opts="$opts $defopts $*"
+opts="$opts $defopts $other"
+if [ -n "$SGE_ROOT" ]; then
+	# Look for an SGE queue
+	if [ -n $FSLGECUDAQ -a $nocuda -eq 0 ]; then
+		# Test that the queue exists
+		qconf -sq $FSLGECUDAQ 2>&1 >/dev/null
+		if [ $? -eq 0 ]; then
+			# CUDA queue exists
+			if [ -x $0_gpu ]; then
+				exec $0_gpu $myopts
+			fi
+		fi
+	fi
+fi
 
+echo subjectdir is $subjdir
 
 #check that all required files exist
 
@@ -159,13 +216,21 @@ if [ ! -d $subjdir ]; then
 fi
 
 if [ ! -e ${subjdir}/bvecs ]; then
+    if [ -e ${subjdir}/bvecs.txt ]; then
+	mv ${subjdir}/bvecs.txt ${subjdir}/bvecs
+    else
 	echo "${subjdir}/bvecs not found"
 	exit 1
+    fi
 fi
 
 if [ ! -e ${subjdir}/bvals ]; then
+    if [ -e ${subjdir}/bvals.txt ]; then
+	mv ${subjdir}/bvals.txt ${subjdir}/bvals
+    else
 	echo "${subjdir}/bvals not found"
 	exit 1
+    fi
 fi
 
 if [ `${FSLDIR}/bin/imtest ${subjdir}/data` -eq 0 ]; then
@@ -185,12 +250,18 @@ if [ `${FSLDIR}/bin/imtest ${subjdir}/nodif_brain_mask` -eq 0 ]; then
 	exit 1
 fi
 
+if [ -e ${subjdir}.bedpostX/xfms/eye.mat ]; then
+	echo "${subjdir} has already been processed: ${subjdir}.bedpostX." 
+	echo "Delete or rename ${subjdir}.bedpostX before repeating the process."
+	exit 1
+fi
+
 echo Making bedpostx directory structure
 
 mkdir -p ${subjdir}.bedpostX/
 mkdir -p ${subjdir}.bedpostX/diff_slices
 mkdir -p ${subjdir}.bedpostX/logs
-mkdir -p ${subjdir}.bedpostX/logs/pid_${$}
+mkdir -p ${subjdir}.bedpostX/logs/monitor
 mkdir -p ${subjdir}.bedpostX/xfms
 
 # This setting is already present in fsl_sub and allows for a more flexible,
@@ -205,73 +276,21 @@ preprocid=$( ${FSL_SUB} -T 60 -N bpx_preproc -l ${subjdir}.bedpostX/logs -B ${FS
 echo Queuing parallel processing stage
 nslices=`${FSLDIR}/bin/fslval ${subjdir}/data dim3`
 [ -f ${subjdir}.bedpostX/commands.txt ] && rm ${subjdir}.bedpostX/commands.txt
+
+monitor
 # Don't be SGE-specific -- rely on FSLPARALLEL
-#if [ "x$SGE_ROOT" = "x" ]; then
 if [ "x$FSLPARALLEL" = "x" ]; then
-
-# 
-# Need to set off a backgrounded monitoring task
-# 
-    cat <<EOM > ${subjdir}.bedpostX/monitor
-#!/bin/sh
-finished=0
-logdir=${subjdir}.bedpostX/logs
-
-check() {
-    if [ \$finished -eq 1 ];then
-        echo "\$nfin slices processed"
-    else
-        nfin=0
-        slice=0
-        while [ "\$slice" -le $nslices ];do
-            slicezp=\`\$FSLDIR/bin/zeropad \$slice 4\`
-            isimg=\`\$FSLDIR/bin/imtest ${subjdir}.bedpostX/diff_slices/data_slice_\$slicezp/dyads1\`
-            if [ \$isimg -eq 1 ];then
-                nfin=\$((\$nfin + 1))
-            fi
-                slice=\$((\$slice + 1))
-        done
-        if [ \$nfin -eq $nslices ] ; then
-            finished=1
-        fi
-        echo "\$nfin slices processed"
-    fi
-}
-exit_test() {
-    isimg=\`\$FSLDIR/bin/imtest ${subjdir}.bedpostX/dyads1\`
-    if [ \$isimg -eq 0 ] ; then
-	echo For some reason the bedpostX process DOES NOT appear
-	echo to have successfully completed. Please examine your
-	echo results carefully.
-    else
-	echo All slices processed
-    fi
-}
-
-check
-n=0
-while [ \$finished -eq 0 ] ; do
-    sleep 10
-    if [ \$n -eq 60 ] ; then
-        check
-        n=0
-    else
-        n=\$((\$n + 1))
-    fi
-done
-exit_test
-EOM
-    chmod +x ${subjdir}.bedpostX/monitor
     ${subjdir}.bedpostX/monitor&
-    monitorpid=$!
 fi
+
 slice=0
 while [ $slice -lt $nslices ]
 do
     slicezp=`$FSLDIR/bin/zeropad $slice 4`
-    if [ `$FSLDIR/bin/imtest ${subjdir}.bedpostX/diff_slices/data_slice_$slicezp/dyads1` -eq 1 ];then
+    if [ `$FSLDIR/bin/imtest ${subjdir}.bedpostX/diff_slices/data_slice_$slicezp/dyads1` -eq 1 ] && [ -f ${subjdir}.bedpostX/logs/monitor/$slice ];then
 	echo "slice $slice has already been processed"
     else
+        [ -f ${subjdir}.bedpostX/logs/monitor/$slice ] && rm ${subjdir}.bedpostX/logs/monitor/$slice
 	if [ ${gflag} -eq 1 ]; then
 	    gopts="$opts --gradnonlin=${subjdir}/grad_dev_slice_${slicezp}"
 	else
@@ -294,39 +313,9 @@ echo Queuing post processing stage
 mergeid=$(${FSL_SUB} -T 60 -N bpx_postproc -l ${subjdir}.bedpostX/logs -B ${FSLDIR}/bin/bedpostx_postproc.sh $subjdir)
 
 # Don't be SGE-specific -- rely on FSLPARALLEL
-#[ "x$SGE_ROOT" = "x" ] && kill -USR1 $monitorpid
-#if [ "x$SGE_ROOT" != "x" ]; then
-[ "x$FSLPARALLEL" = "x" ] && kill -USR1 $monitorpid
 if [ "x$FSLPARALLEL" != "x" ]; then
     echo
     echo Type ${subjdir}.bedpostX/monitor to show progress.
-    cat <<EOM > ${subjdir}.bedpostX/monitor
-#!/bin/sh
-finished=0
-logdir=${subjdir}.bedpostX/logs
-while [ \$finished -eq 0 ] ; do
-    nfin=0
-    slice=0
-    while [ "\$slice" -le $nslices ];do
-        slicezp=\`\$FSLDIR/bin/zeropad \$slice 4\`
-        isimg=\`\$FSLDIR/bin/imtest ${subjdir}.bedpostX/diff_slices/data_slice_\$slicezp/dyads1\`
-        if [ \$isimg -eq 1 ];then
-          nfin=\$((\$nfin + 1))
-        fi
-        slice=\$((\$slice + 1))
-    done
-    echo "\$nfin slices processed"
-
-    if [ -f ${subjdir}.bedpostX/xfms/eye.mat ] ; then
-        finished=1
-        echo "All slices processed"
-    fi
-
-    sleep 600;
-done
-EOM
-    chmod +x ${subjdir}.bedpostX/monitor
-
     echo Type ${subjdir}.bedpostX/cancel to terminate all the queued tasks.
     cat <<EOC > ${subjdir}.bedpostX/cancel
 #!/bin/sh
@@ -337,4 +326,6 @@ EOC
     echo
     echo You will get an email at the end of the post-processing stage.
     echo
+else
+    sleep 190
 fi
